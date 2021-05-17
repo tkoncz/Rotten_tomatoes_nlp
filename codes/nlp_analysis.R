@@ -1,9 +1,4 @@
-## Intro: 
-# How to find a good movie? - IMDB is not doing us any good anymore, but RottenTomatoes is great for this 
-# However as the site got more and more recognition it became harder and harder to find reliable reviews
-# I wanted to see what makes a difference between top critics and critics... (let's find out Rotten Tomatoes definition first)
-
-## First let's do sentiment analysis comparing top_critic and critic
+## Intro is in the markdown 
 
 library(tidytext)
 library(tidyverse)
@@ -13,14 +8,41 @@ library(topicmodels)
 library(widyr)
 data(stop_words)
 
-text_df<- read_csv('final_df_clean.csv')
+text_df<- read_csv('data/clean/rottentomatoes_clean.csv')
 
-head(df)
+head(text_df)
+
+
+# Summary stats
+
+
+sum_df<- 
+    text_df %>% 
+    select(movie, first_genre, year, review ) %>% 
+    group_by(movie,first_genre,year) %>% 
+    count(movie) %>% rename(review_count =  n) %>% 
+    left_join(text_df %>% 
+                  unnest_tokens(word,review) %>% 
+                  group_by(movie,first_genre,year) %>% 
+                  count(movie) %>% 
+                  rename(word_count = n)) %>% 
+    mutate(avg_words_per_review = round(word_count/ review_count,2)) %>% 
+    arrange(year,movie) %>% 
+    mutate(word_count = word_count/1000) %>% 
+    rename(Movie = movie, 
+           Genre = first_genre, 
+           Year = year, 
+           'Reviews No.' = review_count, 'Word No. (in k)' = word_count, 'Word/Review' = avg_words_per_review)
+
+sum(sum_df$`Reviews No.`)
+sum(sum_df$`Word No. (in k)`)
 
 
 # we first do tokenisation and remove stop words
 tidy_reviews <- 
-    text_df %>% mutate(id = rownames(text_df)) %>% unnest_tokens(word,review) %>% 
+    text_df %>% 
+    mutate(id = rownames(text_df)) %>% 
+    unnest_tokens(word,review) %>% 
     anti_join(stop_words)
 
 
@@ -44,7 +66,8 @@ tidy_reviews %>%
     ggplot(aes(reorder_within(word, n, first_genre),n)) + 
     geom_col(fill = 'navyblue') + 
     xlab('') + scale_x_reordered() +
-    coord_flip() +theme_bw() + facet_wrap(~first_genre, scales = 'free')
+    coord_flip() +theme_bw() + 
+    facet_wrap(~first_genre, scales = 'free')
    
 
 ## Let's see word frequency differences between top critic and critic
@@ -72,8 +95,6 @@ cor.test(data =frequency, ~Critic + Top_critic)
 get_sentiments('nrc')
 get_sentiments('bing')
 get_sentiments('afinn')
-
-# TODO: which sentiment data is better for my dataset - I couldn't find a consensus - Textblob was advised
 
 # Comparison of net sentiments for the three lexicons for each review 
 
@@ -170,7 +191,8 @@ bigram_reviews %>% count(first_genre,bigram, sort =T) %>%
         !word1 %in% stop_words$word ,
         !word2 %in% stop_words$word) %>% 
     unite(col = 'bigram',word1:word2, sep =' ' ) %>% 
-    group_by(first_genre) %>% top_n(10,tf_idf) %>%  
+    group_by(first_genre) %>% 
+    top_n(10,tf_idf) %>% 
     ggplot(aes(reorder_within(bigram, n, first_genre),n))  + 
     geom_col(show.legend = F, fill = 'navyblue') + 
     facet_wrap(~first_genre, scales = 'free') +

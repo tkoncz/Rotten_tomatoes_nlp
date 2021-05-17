@@ -2,7 +2,9 @@
 title: "RottenTomatoes - text analysis in R"
 author: "Zsombor Hegedus"
 date: '2021 május 16 '
-output: html_document
+output: 
+    html_document:
+        code_folding: hide
 ---
 
 ```{r setup, include=FALSE}
@@ -11,8 +13,495 @@ knitr::opts_chunk$set(echo = TRUE)
 
 ## Introduction
 
-This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+Have you ever felt that movie ratings on IMBD didn't really match your feelings about the film you just watched? If your answer is yes, then you might also have wandered around the internet seaching for blogs where they thrashed/adored your movie to make you feel sane and understood. In such journeys you might have even bumped into [RottenTomatoes.com]('https://www.rottentomatoes.com/about#whatisthetomatometer'), an amazing site, where the quality of movies are gauged by the **Tomatometer**, the site's internal scoring system which is fed by the reviews of film and television critics. The wisdom of the crowds of experts might actually help you find good movies that are not so much hyped and could also save you from popular ones that are not actually that good.
+Rotten Tomatoes offer their compilation of the best top 100 movies of given year as well. For each of these movies hundreds of critic reviews are available for you to read. This is an exciting data rich territry, something that calls for some text analysis - so let's dig in and see if R can show us some intriguing patterns in this textual data. This article will have two goals: 
 
-When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+- Finding interesting patterns in reviews written for movies in different genres
+- Analyse the sentiments of reviews written by critics and top critics
+- Try out topic modeling and see if that can help us identify year specific vocabulary
+
+All scripts and data are available in my [github repo](https://github.com/zsomborh/Rotten_tomatoes_nlp).
 
 ## Getting the data
+
+I leveraged the `rvest` package and the scraped the short reviews critics wrote on Rotten Tomatoes - the full code is available on my [github]('https://github.com/zsomborh/Rotten_tomatoes_nlp/blob/main/codes/nlp_analysis.R'). I picked the top 10 movies from 2018, 2019 and 2020, generated the links where the reviews lie for each movie and scraped whether the short review is from a critic or a top critic, the name of the the author, when a review was written and the genre. Most short reviews have a longer blogpost tied to it - I collected where those were published and their links, but not the text (which might be a good basis for another project). Let's see a summary of the core features of our data. 
+The below table shows all movies that are in scope of this analysis, their genre, the number of reviews scraped, how many words were in those and the average words in a review. Most movies had multiple genres but for the sake of simplicity I will use the first main genre for further classifications.
+
+```{r, include = T,message = F, echo = T, warning= F}
+library(tidytext)
+library(tidyverse)
+
+text_df<- read_csv('../data/clean/rottentomatoes_clean.csv')
+
+sum_df<- 
+text_df %>% 
+    select(movie, first_genre, year, review ) %>% 
+    group_by(movie,first_genre,year) %>% 
+    count(movie) %>% rename(review_count =  n) %>% 
+    left_join(text_df %>% 
+                  unnest_tokens(word,review) %>% 
+                  group_by(movie,first_genre,year) %>% 
+                  count(movie) %>% 
+                  rename(word_count = n)) %>% 
+    mutate(avg_words_per_review = round(word_count/ review_count,2)) %>% 
+    arrange(year,movie) %>% 
+    mutate(movie = gsub("(?!^)(?=[[:upper:]])", " ", movie, perl=T)) %>% 
+    mutate(word_count = word_count/1000) %>% 
+    rename(Movie = movie, 
+           Genre = first_genre, 
+           Year = year, 
+           'Reviews No.' = review_count, 'Word No. (in k)' = word_count, 'Word/Review' = avg_words_per_review)
+
+```
+
+```{r,  echo = FALSE , results = "asis", warning = FALSE, message = FALSE}
+knitr::kable(sum_df)
+```
+
+As for the totals of the raw textual data - it consists of almost 12k reviews and around 285k words so the average review is around 23-24 words. There must be a character limit on the site for short reviews, and this results in a very evenly distributed wordcount of reviews for every movie. Most of the movies are either *comedy*, *drama* or *action* but we can see some less classical genres coming up as well like *mysteryandthriller* or *gayandlesbian*. 
+
+## 1) Genre specific vocabulary
+
+### Exploring word frequencies
+
+In this review I will follow the `tidytext` approach the core of which is to have a tidy table where each row contains one word only. Furthermore for most of the analysis I removed the stop words using the `stop_words` dictionary combined with an `anti_join`, and removed the posessing forms (so now film or film's are the same).
+
+```{r, include = T,message = F, echo = T, warning= F}
+data(stop_words)
+
+tidy_reviews <- 
+    text_df %>% 
+    mutate(id = rownames(text_df)) %>% 
+    unnest_tokens(word,review) %>% 
+    anti_join(stop_words) %>% 
+    mutate(word  = gsub("'s",'',word))
+
+
+```
+
+Now I have a clean and tidy table, so let's see what we were the most common words if we pool all this together (now we just look at words that occurred more than 400 times in the reviews). 
+
+```{r,  echo = T , results = "asis", warning = FALSE, message = FALSE, fig.width = 12}
+tidy_reviews %>%  
+    count(word,sort = T) %>% 
+    filter(n>400) %>% 
+    mutate(word = reorder(word,n)) %>% 
+    ggplot(aes(word,n)) + 
+    geom_col(fill = 'navyblue') + 
+    xlab('') + 
+    coord_flip() +theme_bw()
+```
+
+It looks like film and movie are the most common words - for what it's worth at least I can already conclude that my scraper was working and indeed found reviews that are about films. Looking at a few of those reviews it turns out that film or movie was often the subject of given text (e.g. This *film* is about ...). These words are not very useful for purposes when for example we want to see if reviews of a given genre has a specific vocabulary to others or not. For this reason I will exclude a few common domain specific words for latter analysis.
+
+Let's see if there is any genre specific vocabulary that we can read out from the data with some plotting. The below plot looks at the top 10 words used in differnet genres.
+
+```{r,  echo = T , results = "asis", warning = FALSE, message = FALSE, fig.width = 12, fig.height=10}
+
+common_movie_words <- c('movie', 'film' , 'films', 'movies')
+
+
+tidy_reviews %>% 
+    count(first_genre, word, sort = T) %>% arrange(desc(n)) %>% 
+    group_by(first_genre) %>% 
+    filter(!word  %in%  common_movie_words) %>% 
+    slice(1:10) %>% 
+    ggplot(aes(reorder_within(word, n, first_genre),n)) + 
+    geom_col(fill = 'navyblue') + 
+    labs(x= '', y='') + scale_x_reordered() +
+    coord_flip() +theme_bw() + 
+    facet_wrap(~first_genre, scales = 'free_y')
+
+```
+
+What can we see from the above? There is a lot of characters, movie names, actors that come up with a very high frequency in these categories. Other than such entities we can see some words that fit will into their respective genre like: funny in comedy, beautiful in drama, war in history or metal in music. But maybe the most frequently used words are not the most important ones - let's take this further and try to sophisticate this a bit. 
+
+### Tf-idf
+
+Tf-idf combines two important principles: 
+
+- **term frequency(tf):** this was introduced in the earlier chapter, we look at how often a word occurrs in a given document. 
+- **inverse term frequency:** is a weight which is very low for commonly used words and increasingly high for words that are used not so many times
+
+Combining these two is a way to shed some light on the importance of a given word in a document (e.g. something that appears not so many time (higher idf weight), but comes up in multiple documents (term frequency os not zero)). `tidytext` makes it effortless to check tf-idf scores - I visualised the top 10 words in each genre in the below bar charts.
+
+```{r,  echo = T , results = "asis", warning = FALSE, message = FALSE, fig.width = 12, fig.height=10}
+
+tidy_reviews %>% count(first_genre, word, sort = T) %>% 
+    ungroup() %>%
+    bind_tf_idf(word,first_genre,n) %>% 
+    group_by(first_genre) %>%
+    filter(!word  %in%  common_movie_words) %>% 
+    top_n(10,tf_idf) %>%  
+    ggplot(aes(reorder_within(word, n, first_genre),n))  + 
+    geom_col(show.legend = F, fill = 'navyblue') + 
+    facet_wrap(~first_genre, scales = 'free') +
+    scale_x_reordered() +
+    coord_flip() + 
+    theme_bw() + 
+    labs(x='',y='')
+```
+
+Well, this didn't help too much in case we want to find the genre specific review vocabulary (word frequency was actually more helpful for that) but if we wanted to find the main entities (actors, name of characters, movie names or directors) of the films in question, this is a much better way. Probably not all reviews named the characters or the director, so their tdf weight was probably not that low, while it still occurred relatively frequently. When looking at these entities, I see many words that usually belong together (like black and panther, chadwich and boseman or avengers and endgame). Fortunately there is a nice tool we can use to check these co-occurrances. 
+
+### Bi-grams 
+
+We can look at tf-idf scores not only for the words but also n-grams which are consecutive sequencies of words, where n stand for the amount of sequencies we want to look at. From the eariler chapter I thought an n=2 would be a good one, so bi-grams are the way to go. The `unnet_tokens()` function can help here as well, we will get the bigrams out from the original text dataframe. 
+
+```{r, include = T,message = F, echo = T, warning= F}
+bigram_reviews <- 
+    text_df %>% mutate(id = rownames(text_df)) %>% 
+    unnest_tokens(bigram,review, token = 'ngrams', n = 2) %>% 
+    mutate(bigram = gsub("'s",'',bigram))
+
+```
+
+We then calculate tf-idf and pipe all of this into the usual bar charts (with stop words removed) following the below code (this is a somewhat complicated pipeline, so I included some comments for easier understanding): 
+
+```{r,  echo = T , results = "asis", warning = FALSE, message = FALSE, fig.width = 12, fig.height=8}
+
+
+bigram_reviews %>% 
+    # First we calculate tf-idf for all bigrams
+    count(first_genre,bigram, sort =T) %>% 
+    bind_tf_idf(bigram, first_genre, n) %>% 
+    # Then bigrams are separated into two columns
+    separate(bigram,c('word1', 'word2'), sep=  ' ') %>% 
+    # remove bi-grams with stop words
+    filter(
+        !word1 %in% stop_words$word ,
+        !word2 %in% stop_words$word,
+        !word1 %in% common_movie_words ,
+        !word2 %in% common_movie_words ) %>% 
+    # merge word1 and word2 into one column
+    unite(col = 'bigram',word1:word2, sep =' ' ) %>% 
+    # get top 10 of every genre and plot this pipeline -there are ties
+    group_by(first_genre) %>% 
+    top_n(10,tf_idf) %>% 
+    ggplot(aes(reorder_within(bigram, n, first_genre),n))  + 
+    geom_col(show.legend = F, fill = 'navyblue') + 
+    facet_wrap(~first_genre, scales = 'free') +
+    scale_x_reordered() +
+    coord_flip() + 
+    theme_bw() + 
+    labs(x='', y='')
+
+```
+
+And this is on point, the words that I thought should belong together actually do - I believe this is a nice improvement and for the sake of entity recognition, bi-grams are much more useful compared to simple words. One might wonder what would happen if we went for higher n-grams as well, so let's take a look at an interesting network visual and decide whether that is a good idea or not. 
+
+```{r,  echo = T , results = "asis", warning = FALSE, message = FALSE, fig.width = 12, fig.height=10}
+
+library(igraph)
+library(ggraph)
+
+bigram_graph <-
+bigram_reviews %>% 
+    separate(bigram,c('word1', 'word2'), sep=  ' ') %>% 
+    filter(
+        !word1 %in% stop_words$word ,
+        !word2 %in% stop_words$word,
+        !word1 %in% common_movie_words ,
+        !word2 %in% common_movie_words ) %>% 
+    count(word1, word2, sort = T ) %>%
+    select(from = word1, to= word2, n) %>% 
+    filter(n>30) %>% 
+    graph_from_data_frame()
+
+a<- grid::arrow(type = 'closed', length = unit(.15, 'inches'))
+
+ggraph(bigram_graph, layout = 'fr') +
+    geom_edge_link(aes(edge_alpha = n), show.legend = F, arrow= a, end_cap = circle(.07,'inches'))+
+    geom_node_point(color = 'lightblue', size = 5)+ geom_node_text(aes(label = name), vjust = 1, hjust = 1)+
+    theme_void()
+
+```
+
+Based on this graph, I would say 2 n-grams are pretty good - I see only a few 3-4 sequence connections.
+
+So to sum up the conclusions from this chapter, if we are interested in genre specific vocabulary in reviews, term frequencies are helpful. However, if we want to identify the main entities based on these reviews, bi-grams combined with tf-idf can do a pretty nice job. It must be noted though that the limitation of this analysis is the limited amount of movies that were in scope of this analysis.
+
+## Sentiment analysis - critics and top critics
+
+### Look at differences in word frequencies 
+
+I was very interested to see if there are any apparent differences in the style of reviews written by [critics and top critics]('https://www.rottentomatoes.com/critics/top_critics'), where the latter is designated to Tomatometer approved reviewers picked by the site itself based on their contributions. There is a comprehensive selection criterion for one to become a top critic, so let's see if we can pinpoint any major differences with the help of a few text analysis tools. Firstly, I plotted how frequently critics and top critics used words in a scatterplot style where data points are the words itselves.
+
+```{r,  echo = T , results = "asis", warning = FALSE, message = FALSE, fig.width = 12, fig.height=4}
+tidy_reviews %>% 
+    count(top_critic, word) %>% 
+    group_by(top_critic) %>% 
+    filter(!word  %in%  common_movie_words) %>% 
+    mutate(proportion = n/sum(n)) %>% select(-c(n)) %>% 
+    mutate(top_critic = ifelse(top_critic,'Top_critic','Critic')) %>%  
+    pivot_wider(names_from = top_critic, values_from = proportion) %>% 
+    ggplot(aes(x=Critic, y = Top_critic))+ 
+    geom_text(aes(label = word), hjust = 0, size = 3) +
+    geom_abline(color = 'navyblue')+
+    theme_bw() 
+```
+
+A correlation test is here to quantify this impact:
+
+``` {r}
+
+tidy_reviews %>% 
+    count(top_critic, word) %>% 
+    group_by(top_critic) %>% 
+    mutate(proportion = n/sum(n)) %>% select(-c(n)) %>% 
+    mutate( top_critic = ifelse(top_critic,'Top_critic','Critic')) %>%  
+    pivot_wider(names_from = top_critic, values_from = proportion) %>% 
+    cor.test(data = ., ~Critic + Top_critic)
+
+```
+
+Looks like datapoints are pretty much scattered on the 45 degree line so we can't really see a huge difference here. Correlation is very high (above 0.9) - we can conclude that from word frequencies only, we can't see too many differences. Altought it is interesting to see the words: *spanish* and *review* acting as an outlier - looks like if someone wants to be a top critic, they should avoid using these two in the short reviews. Maybe we can find a difference in something else as well.
+
+### Sentiment analysis - finding the fitting lexicon
+
+Word frequencies couldn't really tell critics and top critics apart, but maybe if we look at the emotional content of the words used by these two groups, we can see some interesting patterns. In order to do this, we need a sentiment lexicon, which is a collection of words each associated with a different sentiment score or topic. `tidytext` is great here as well, as it provides access to several sentiment lexicons, but which ones should I choose for my use case? Internet research didn't bring me closer to finding the perfect sentiment lexicon for movie reviews so I decided to try out 3 commonly used libraries and compare how the distribution of sentiment scores would look like if I were to use them on my data. 
+I will leverage `inner_join` here to join my unnested tokens to the words in the sentiment lexicon, from which I only care about the words with positive and negative sentiment. After that I calculated the net sentiment for each review, which is simply to subtract the amount of positive words from the amount of negative words. After that I plot the histograms of the sentiments scores in the below chart. 
+
+
+```{r,  echo = T , results = "asis", warning = FALSE, message = FALSE, fig.width = 12}
+
+#let's first join on afinn lexicon
+afinn <- 
+tidy_reviews %>% 
+    inner_join(get_sentiments('afinn')) %>% 
+    group_by(index = id) %>% 
+    summarise(sentiment = sum(value)) %>% mutate(method = 'AFINN')
+
+# joining further on bing and nrc lexicons - they have a slightly differnet structure to afinn
+# but very similar structure to each other
+bing_and_nrc <- 
+bind_rows (
+    tidy_reviews %>% 
+        inner_join(get_sentiments('bing')) %>% 
+        mutate(method = 'Bing'),
+    
+    tidy_reviews %>% 
+        inner_join(get_sentiments('nrc') %>% 
+                       filter(sentiment %in% c('positive','negative'))) %>% 
+        mutate(method = 'NRC')
+
+) %>% 
+    count(method, index = id, sentiment) %>% 
+    spread(sentiment,n,fill = 0) %>% 
+    mutate(sentiment = positive-negative)
+
+# Create histograms after binding the three lexicons together
+bind_rows(afinn,
+          bing_and_nrc) %>% 
+    ggplot(aes(sentiment, fill = method)) + scale_fill_brewer('Dark2') +
+    geom_histogram(binwidth =1, color = 'black' )+
+    facet_wrap(~method, scales = 'free') +
+    theme_bw() + 
+    theme(legend.title=element_blank())+
+    xlab('Net sentiment') 
+    
+```
+
+Bing and NRC looks very similar, AFINN has a wider range and a slightly differently shaped distribution, but they seem to be pretty similar overall - symmetrical distribution with a lot of neutral, and mildly positive/negative reviews. Since they look very similar, I don't think it matters much which one I choose, so I went with the one that could map the most words - NRC. 
+
+### Analysing sentiments
+
+Now that I have chosen the lexicon, let's play around a bit. I have a date scraped for all reviews (unfortunately not in minute but in daily granularity, but that will do fine now) and so I will use those dates and order my documents by that. We can first check how the sentiment of reviews changed over time for every movie in the below charts (the left chart shows the net sentiment of each review in a ordered manner, the other will show the cumulative sum of sentiments over time).
+
+```{r,  echo = T , results = "asis", warning = FALSE, message = FALSE, fig.width = 12}
+
+ts_reviews<-
+tidy_reviews %>% 
+    inner_join(get_sentiments('nrc') %>% 
+                       filter(sentiment %in% c('positive','negative'))
+               ) %>% 
+    group_by(index = id, movie, review_date) %>% 
+    count(id, movie, sentiment) %>% 
+    spread(sentiment, n, fill =  0) %>%
+    mutate(sentiment = positive-negative) %>% 
+    arrange(movie,review_date) %>% 
+    as.data.frame() %>% 
+    mutate(chg = movie !=dplyr::lag(movie,1),
+           chg = ifelse(is.na(chg),TRUE,chg))  %>% 
+    group_by(grp = cumsum(chg == T)) %>% 
+    mutate(counter = row_number(),
+           cumsum = ave(sentiment, cumsum(chg == T), FUN = cumsum)) 
+
+p1<- ts_reviews %>% 
+    ggplot(aes(x = counter, y = sentiment, color = movie)) + 
+    geom_line() +theme_bw() + 
+    theme(legend.position = 'none') + 
+    labs(title = 'Ordered short review net sentiments of different movies', x = '', y = '') 
+
+
+p2<- ts_reviews %>% 
+    ggplot(aes(x = counter, y = cumsum, color = movie)) + 
+    geom_line() +theme_bw() + 
+    theme(legend.position = 'none') +
+    labs(title = 'Cumulative sum of net sentiments of different movies' ,x = '', y = '') 
+
+cowplot::plot_grid(p1,p2)
+
+```
+
+The plot on the left is probably not very informative as there are many overlapping lines, but what it tries to convey is that there are no movies with reviews that always have positive sentiments. It resembles a  process with stationary mean and variance. The cumulative sums on the other hand show two interesting stories: 
+
+- Even though I analysed the best movies, the sentiment of reviews for some of them ended up in the negative territory.  
+- The cumulative sum of sentiments for these movie reviews seem to be monotonous, meaning that the passing of time didn't really have an effect on the sentiment of the reviews for given movie. 
+
+### Comparing critic and top critic sentiments
+
+We can take a look a the most common words with positive and negative sentiment used by critics and top critics. Understanding the difference on how top critics formulate their reviews could help critics to step up their game. We saw earlier that the two groups use words with relatively similar frequencies, but in that comparison we missed the words that were used by only one of the groups. Maybe we can find some important words here that can distinguish a top critic from a critic. The below bar charts will show the most used words with given sentiment for critics and top critics - I also removed a few words that were movie titles that biased the sentiments (e.g. black is a word with negative sentiment in the NRC lexicon, but we saw earlier from the bi-grams that it comes up mostly as Black Panther; the moview title, so it shouldn't have any sentiment tied to it). 
+
+```{r,  echo = T , results = "asis", warning = FALSE, message = FALSE, fig.width = 12, fig.height=6}
+
+
+movie_specific_words <- c('black', 'impossible', 'marvel', 'parasite', 'director')
+
+
+p1<- tidy_reviews %>% 
+    inner_join(get_sentiments('nrc') %>% 
+                       filter(sentiment %in% c('positive','negative'))
+               ) %>% 
+    filter(top_critic == TRUE) %>% 
+    filter(!word %in% movie_specific_words) %>% 
+    count(word, sentiment) %>% 
+    group_by(sentiment) %>% 
+    slice_max(n, n=10) %>% 
+    ggplot(aes(reorder_within(word, n, sentiment),n,fill=sentiment)) +
+    geom_col(show.legend = F, color= 'black') + 
+    scale_fill_brewer('Dark2') + 
+    facet_wrap(~sentiment, scales= 'free_y') + scale_x_reordered() +
+    labs(title = 'Top 10 words with biggest positive/negative contribution for Top Critics', x = '', y= '')+
+    coord_flip() + theme_bw()
+
+p2<- tidy_reviews %>% 
+    inner_join(get_sentiments('nrc') %>% 
+                       filter(sentiment %in% c('positive','negative'))
+               ) %>% 
+    filter(top_critic == FALSE) %>% 
+    filter(!word %in% movie_specific_words) %>% 
+    count(word, sentiment) %>% 
+    group_by(sentiment) %>% 
+    slice_max(n, n=10) %>% 
+    ggplot(aes(reorder_within(word, n, sentiment),n,fill=sentiment)) +
+    geom_col(show.legend = F, color= 'black') + 
+    scale_fill_brewer('Dark2') + 
+    facet_wrap(~sentiment, scales= 'free_y') + scale_x_reordered() +
+    labs(title = 'Top 10 words with biggest positive/negative contribution for Critics', x = '', y= '')+
+    coord_flip() + theme_bw()
+
+cowplot::plot_grid(p1,p2, nrow = 2)
+```
+
+From the above, we can see that the words with positive sentiments are quite alike for the two groups but there is some versatility for the negative ones. But was there any specific word that was more important than the others? Maybe tf-idf can help us answer this question as well. 
+
+```{r,  echo = T , results = "asis", warning = FALSE, message = FALSE, fig.width = 12, fig.height=6}
+p3<- tidy_reviews %>% 
+    inner_join(get_sentiments('nrc') %>% 
+                       filter(sentiment %in% c('positive','negative'))
+               ) %>% 
+    filter(top_critic == TRUE) %>% 
+    filter(!word %in% movie_specific_words) %>% 
+    count(word, sentiment) %>%
+    ungroup() %>% 
+    bind_tf_idf(word,sentiment,n) %>% 
+    group_by(sentiment) %>% 
+    slice_max(tf_idf, n=10) %>% 
+    ggplot(aes(reorder_within(word, tf_idf, sentiment),tf_idf,fill=sentiment)) +
+    geom_col(show.legend = F, color= 'black') + 
+    scale_fill_brewer('Dark2') + 
+    facet_wrap(~sentiment, scales= 'free_y') + scale_x_reordered() +
+    labs(title = ' Top 10 words with biggest positive/negative tf-idf for Top Critics', x = '', y= '')+
+    lims(y = c(0,0.035))+
+    coord_flip() + 
+    
+    theme_bw()
+
+p4<- tidy_reviews %>% 
+    inner_join(get_sentiments('nrc') %>% 
+                       filter(sentiment %in% c('positive','negative'))
+               ) %>% 
+    filter(top_critic == FALSE) %>% 
+    filter(!word %in% movie_specific_words) %>% 
+    count(word, sentiment) %>%
+    ungroup() %>% 
+    bind_tf_idf(word,sentiment,n) %>% 
+    group_by(sentiment) %>% 
+    slice_max(tf_idf, n=10) %>% 
+    ggplot(aes(reorder_within(word, tf_idf, sentiment),tf_idf,fill=sentiment)) +
+    geom_col(show.legend = F, color= 'black') + 
+    scale_fill_brewer('Dark2') + 
+    facet_wrap(~sentiment, scales= 'free_y') + scale_x_reordered() +
+    labs(title = 'Top 10 Words with biggest positive/negative tf-idf for Critics', x = '', y= '')+
+    coord_flip() + 
+    theme_bw()
+
+
+cowplot::plot_grid(p3,p4, nrow = 2)
+```
+
+Okay this looks intersting, tf-idf actually found something. Horror is just too important while love is not important enough. Probably this is not enough evidence to make this as a very strong claim, but the above signals that critics might put too much emphasis on quite negative words like *war* or *horror* in these examples. 
+
+So to conclude this chapter I compared the reviews written by critics and top critics. I checked whether any difference can be seen from the vocabulary they use to write reviews. Term frequencies showed that the words used by the two groups are actually very similar. In terms of sentiments, using NRC sentiment lexicon I learnt some interesting patterns on how reviews change over time. Lastly, I concluded that based on the most used words with positive/negative sentiments, ciritcs tend to put more emphasis on frequently used negative words like *horror* compared to top critics.
+
+## Topic modeling for the year of the movie
+
+Would it be possible to come up with a sort of clustering that can correctly identify when movies were made based on the reviews written by the critics? In this chapter I will find out whether the style critics used in different years have differing characteristics and whether topic modeling can help distinguish reviews based on that. 
+
+In order to find this out I will use Latent Dirichlet allocation (LDA) method for fitting a topic model. The advantage of this approach is that it can decide how much of a document belong to distinct topics allowing overlaps as well. This can help us understand how likely it is that a word or a document belong to a given topic which is identified in an unsupervised way by the model itself. I will use the `topicmodels` package which is a pretty nice implementation, that allows us to do topic modeling with a few lines of code only. First I created a document term matrix with the `cast_dtm` function, then I created 3 topics with the `LDA` function.
+
+```{r, include = T,message = F, echo = T, warning= F}
+library(topicmodels)
+library(widyr)
+
+reviews_dtm <- 
+tidy_reviews %>% 
+    filter(!word  %in%  common_movie_words) %>% 
+    unite(document, year, id) %>% 
+    count(document,word) %>% 
+    cast_dtm(document,word,n)
+
+reviews_lda<- LDA(reviews_dtm, k = 3, control = list(seed = 20210514))
+
+```
+
+Now I will plot 3 boxplots for each year. In each subplot, there are 3 boxplots, all showing the $\gamma$ value of reviews that were put into their respecitve LDA topics. The $\gamma$ is to express how likely a document is to be generated from a given topic. If there is a specific vocabulary tied to those years that the LDA was able to find, than the interquartile range of the gammas will be visually separable on the boxplots.  
+
+```{r,  echo = T , results = "asis", warning = FALSE, message = FALSE, fig.width = 12}
+
+reviews_lda %>% 
+    tidy(matrix = 'gamma') %>% 
+    separate(document, c('year', 'id'), sep = '_') %>% 
+    mutate(top_critic = reorder(year, gamma * topic)) %>% 
+    ggplot(aes(factor(topic), gamma)) + 
+    geom_boxplot() + 
+    facet_wrap(~year, scales = 'free') + 
+    theme_bw() + xlab('topics')
+```
+
+Turns out that there is no such difference in the language. This is a bit disappointing, but probably not very surprising. The important thing the boxplots show is that the vocabulary didn't have a major difference in vocabulary between these years when it comes to the short reviews, otherwise they would have been put into different topics by LDA. Lastly we can take a look at the $\beta$s which are the probability estimates of how likely the model thinks a given word is generated from a given topic - we look at top 10 most likely words for each topic. 
+
+```{r,  echo = T , results = "asis", warning = FALSE, message = FALSE, fig.width = 12, fig.height=4}
+
+reviews_lda %>% tidy() %>% 
+    group_by(topic) %>% 
+    top_n(10, beta) %>% 
+    ungroup() %>% 
+    mutate(term = reorder(term,beta)) %>% 
+    ggplot(aes(reorder_within(term, beta, topic),beta,fill = factor(topic)))+
+    geom_col(show.legend = F, color = 'black') + 
+    facet_wrap(~topic, scales='free_y') + 
+    scale_x_reordered() +
+    scale_fill_brewer('Dark2') +
+    coord_flip()+ 
+    theme_bw() + xlab('')
+```
+
+Unfortunately I couldn't really tell why these words belong together, the distinction is not very visible from these terms alone and there are many overlaps between words with the highest $\beta$s so all in all, I didn't succees in this topic modeling exercise. However I learnt that critics are pretty consistent over time with their vocabulary in my sample.
+
+## Conclusions 
+
+I set out to carry out text analysis and demonstrate the strength of some powerful R packages on short reviews written on [RottenTomatoes.com](https://www.rottentomatoes.com/). I found out that term frequencies can help identify genre specific vocabularies while using the combination of bi-grams and tf-idf could pretty well identify the main entities the reviews were about. I also learnt that critics and top critics use words with very similar frequencies, and that if critics want to improve their status they shouldn't use the words: spanish and review so frequently (this is more of a joke as this is probably very specific to this sample of reviews only), and shouldn't put too much emphasis on negative words. Lastly, topic modeling with LDA couldn't really put the reviews or the words into topics that corresponded to the years when the given movie was made, which makes me believe that reviews were consistent in their vocabulary over the examined years. 
+
+The two most important limitations to the analysis is the shortness of the examined reviews and the small scope of movies that were analysed. Scraping the longer reviews and including more movies into a similar analysis could also yield very interesting results. My main goal with this article was to explore and play around that data, but I also feel that it can serve as a good basis for further research.

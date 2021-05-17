@@ -12,8 +12,8 @@ df %>% mutate(
 
 
 df<- 
-df %>% separate(genre, 
-                c('first_genre', 'second_genre'),
-                sep = ',', extra='merge', remove = F)
+    df %>% separate(genre, 
+                    c('first_genre', 'second_genre'),
+                    sep = ',', extra='merge', remove = F)
 
 write_csv(df, '../data/clean/rottentomatoes_clean.csv')

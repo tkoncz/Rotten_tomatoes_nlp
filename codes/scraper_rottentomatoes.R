@@ -7,7 +7,7 @@ library(tidyverse)
 
 
 get_movies <- function(year) {
-   
+    
     ###
     #   This function is to get the top 100 movies html table into a data table
     #   filter for top 10 and create a column for the page with the reviews 
