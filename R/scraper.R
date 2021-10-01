@@ -13,7 +13,6 @@ getMovies <- function(year) {
     url <- paste(base_url, subdomain, query, sep = '/')
 
     # Get table with contents
-
     t <- read_html(url)
 
     table <- t %>% html_table(fill = T)
@@ -29,94 +28,29 @@ getMovies <- function(year) {
     table[, review_link := paste0(base_url, '/', link, '/reviews')]
 
     return(table)
-
 }
 
 
-# Get reviews -------------------------------------------------------------
+getShortReviews <- function(url) {
+    html <- read_html(url)
 
-get_pages <- function(link) {
+    critics <- html %>%
+        html_elements(xpath = '//*[@class="row review_table_row"]')
 
-    t<- read_html(link)
+    critic_names <- critics %>%
+        html_elements(xpath = '//*[@class="col-sm-17 col-xs-32 critic_name"]/a') %>%
+        html_text() %>%
+        trimws()
 
-    Sys.sleep(10)
+    short_reviews <- critics %>%
+        html_elements(xpath = '//*[@class="the_review"]') %>%
+        html_text() %>%
+        trimws()
 
-    maxnum <- t %>%
-        html_nodes('.pageInfo') %>%
-        html_text() %>% .[1] %>%
-        strsplit(split = ' ') %>% .[[1]] %>% .[4]
-
-
-    pages <- paste0(link,'?type=&sort=&page=',1:maxnum)
-
-    return(pages)
-
-}
-
-# TODO: Include years - this could easily be done in scraper, but I made a mistake by not adding it
-# Extra hacks to get year back are available in the end of this script
-
-get_reviews <- function(link) {
-
-    print('Initiating script...')
-
-    t<- read_html(link)
-
-    print(paste0('HTML is read for ',link))
-
-    wait = sample(c(5,6,7),1)
-    Sys.sleep(wait)
-
-    print('Sleeping is done')
-
-    genre <- t %>% html_nodes('.center+ .bottom_divider li:nth-child(2)') %>% html_text()
-    genre <- gsub("[\r\n ]", "", genre)
-
-
-    movie <- t %>% html_nodes('.panel-bottom_divider .reviews-content') %>%
-        html_nodes('.center') %>%
-        html_nodes('.articleLink') %>%
-        html_text()
-    movie <- gsub("[\r\n ]", "", movie)
-
-    print('Genre and movie name are successfully scraped')
-
-    boxes <- t %>% html_nodes('.review_table_row')
-
-
-    df <- lapply(boxes, function(x){
-        t_list <- list()
-        t_list[['name']] <- x %>% html_nodes('.articleLink') %>% html_text()
-
-        t_list[['review']] <- x %>% html_nodes('.the_review') %>% html_text()
-
-        t_list[['review_date']] <- x %>% html_nodes('.review-date') %>% html_text()
-
-        t_list[['published']] <- x %>% html_nodes('.critic-publication') %>% html_text()
-
-        review_link <- x %>%
-            html_nodes('.review-link a') %>%
-            html_attr('href')
-
-        t_list[['review_link']] <- ifelse(identical(review_link,character(0)),'NULL', review_link)
-
-        critic <- x %>%
-            html_nodes('.critic-info') %>%
-            html_nodes('.critic_name') %>%
-            html_nodes('.small') %>%
-            html_attr('class')
-
-        t_list[['top_critic']] <- !identical(critic,character(0))
-
-        return(data.frame(t_list))
-    }) %>% rbindlist()
-
-
-
-    df$genre <- genre
-    df$movie <- movie
-
-    print(paste0('Dataframe for ',link,' is ready'))
-
-    return(df)
+    data.table(
+        review_link = url,
+        critic_name = critic_names,
+        short_review = short_reviews,
+        full_review_link = full_review_links
+    )
 }
