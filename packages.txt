@@ -1,3 +1,4 @@
 rvest
 data.table
-tidyverse
+purrr
+magrittr

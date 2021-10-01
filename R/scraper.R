@@ -1,21 +1,20 @@
-get_movies <- function(year) {
+getMovies <- function(year) {
 
     ###
     #   This function is to get the top 100 movies html table into a data table
-    #   filter for top 10 and create a column for the page with the reviews
+    #   and create a column for the page with the reviews
     ###
 
 
     # Get URL components + final URL
-    base <- 'https://www.rottentomatoes.com'
+    base_url <- 'https://www.rottentomatoes.com'
     subdomain <- 'top/bestofrt'
-    query <- paste0('?year=',year)
-    url <- paste0(c(base,subdomain,query), collapse = '/')
+    query <- paste0('?year=', year)
+    url <- paste(base_url, subdomain, query, sep = '/')
 
     # Get table with contents
-    t<- read_html(url)
 
-    Sys.sleep(10) # sleep for a while so that servers are not overloaded
+    t <- read_html(url)
 
     table <- t %>% html_table(fill = T)
     table <- as.data.table(table[[3]])
@@ -24,13 +23,10 @@ get_movies <- function(year) {
         html_nodes('.articleLink') %>%
         html_attr('href')
 
-    # Filter only the top 10
-    table <- table[Rank<=10,]
-
     # Add extra vars
-    table$year <- year
-    table$review_link <- paste0(c(base,table$link,'reviews'),collapse = '/')
-    table[, review_link := paste0(base, '/', link,'/reviews')]
+    table[, year := year]
+    table[, review_link := paste0(c(base_url, link, 'reviews'), collapse = '/')]
+    table[, review_link := paste0(base_url, '/', link, '/reviews')]
 
     return(table)
 

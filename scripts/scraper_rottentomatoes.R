@@ -1,7 +1,11 @@
 source("global.R")
 
-years <- c(2018,2019,2020)
-all_movies <- rbindlist(lapply(years,get_movies))
+years <- c(2020)
+all_movies <- purrr::map(years, ~{
+    Sys.sleep(2)
+    getMovies(.x)
+}) %>%
+    rbindlist()
 
 # second we get the links where the reviews lie and save this list to disk
 
