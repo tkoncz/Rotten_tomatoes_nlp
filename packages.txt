@@ -2,3 +2,4 @@ rvest
 data.table
 purrr
 magrittr
+glue

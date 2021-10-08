@@ -7,7 +7,8 @@ all_movies <- purrr::map(years, ~{
 }) %>%
     rbindlist()
 
-short_reviews <- purrr::map(all_movies[, review_link], ~{
+movie_ids <- all_movies[, gsub("/m/", "", link)]
+short_reviews <- purrr::map(movie_ids, ~{
     Sys.sleep(1)
     getShortReviews(.x)
 }) %>%
