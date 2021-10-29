@@ -14,7 +14,9 @@ review_words_by_movie[, .N, movie_id][order(-N)]
 review_words_by_movie[, .N, word][order(-N)]
 
 # stopwords
-stop_words <- tidytext::stop_words %>% data.table()
+stop_words <- tidytext::stop_words %>%
+    data.table() %>%
+    .[lexicon == "onix"]
 
 review_words_by_movie <- review_words_by_movie[!stop_words, on = "word"]
 
