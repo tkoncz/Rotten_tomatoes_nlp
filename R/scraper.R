@@ -54,18 +54,18 @@ getShortReviews <- function(movie_id) {
         html_elements(xpath = '//div[@class="row review_table_row"]')
 
 
-    critic_names <- reviews %>%
-        html_elements(xpath = '//div[@class="col-xs-8 critic-info"]') %>%
-        html_elements(xpath = 'div[@class="col-sm-17 col-xs-32 critic_name"]') %>%
-        html_elements(xpath = 'a[@class="unstyled bold articleLink"]') %>%
-        html_text() %>%
-        trimws()
+    # critic_names <- reviews %>%
+    #     html_elements(xpath = '//div[@class="col-xs-8 critic-info"]') %>%
+    #     html_elements(xpath = 'div[@class="col-sm-17 col-xs-32 critic_name"]') %>%
+    #     html_elements(xpath = 'a[@class="unstyled bold articleLink"]') %>%
+    #     html_text() %>%
+    #     trimws()
 
-    review_dates <- reviews %>%
-        html_elements(xpath = '//div[@class="review_area"]') %>%
-        html_elements(xpath = '//div[@class="review-date subtle small"]') %>%
-        html_text() %>%
-        trimws()
+    # review_dates <- reviews %>%
+    #     html_elements(xpath = '//div[@class="review_area"]') %>%
+    #     html_elements(xpath = '//div[@class="review-date subtle small"]') %>%
+    #     html_text() %>%
+    #     trimws()
 
     short_reviews <- reviews %>%
         html_elements(xpath = '//div[@class="review_area"]') %>%
@@ -82,7 +82,8 @@ getShortReviews <- function(movie_id) {
 
     all_same_length <- all(sapply(
         # list(critic_names, review_dates, short_reviews, full_review_links),
-        list(critic_names, review_dates, short_reviews),
+        # list(critic_names, review_dates, short_reviews),
+        list(short_reviews),
         FUN = function(x) identical(length(x), length(reviews))
     ))
 
@@ -90,8 +91,8 @@ getShortReviews <- function(movie_id) {
         return(data.table(
             movie_id = movie_id,
             reviews_page = url,
-            critic_name = critic_names,
-            review_date = review_dates,
+            # critic_name = critic_names,
+            # review_date = review_dates,
             short_review = short_reviews
             # , full_review_link = full_review_links
         ))
