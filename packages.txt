@@ -8,3 +8,5 @@ stringr
 wordcloud
 tm
 slam
+textdata
+ggplot2
