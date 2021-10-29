@@ -62,7 +62,7 @@ getMoviesForFranchise <- function(franchise_id) {
 
     if (all_same_length) {
         return(data.table(
-            movide_id = movie_ids,
+            movie_id = movie_ids,
             movie_title = movie_titles,
             movie_poster = movie_posters,
             media_score = media_scores,

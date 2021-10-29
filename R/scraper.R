@@ -88,7 +88,7 @@ getShortReviews <- function(movie_id) {
 
     if (all_same_length) {
         return(data.table(
-            movide_id = movie_id,
+            movie_id = movie_id,
             reviews_page = url,
             critic_name = critic_names,
             review_date = review_dates,
