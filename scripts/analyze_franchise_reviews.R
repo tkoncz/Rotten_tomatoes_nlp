@@ -33,7 +33,16 @@ wordcloud::wordcloud(
     freq = word_frequencies[, num_occurance]
 )
 
-## TODO: drop James Bond (~ domain specific stopwords)
+# drop James Bond & other non-informative words (~ domain specific stopwords)
+movie_stop_words <- data.table(
+    word = c("james", "bond", "007", "film", "series", "movie", "films", "franchise")
+)
+
+review_words_by_movie %>%
+    .[!movie_stop_words, on = "word"] %>%
+    .[, .(num_occurance = .N), by = "word"] %>%
+    .[order(-num_occurance)] %>%
+    head(10)
 
 # n-grams
 review_bigrams_by_movie <- reviews[, .(movie_id, short_review)] %>%
