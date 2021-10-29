@@ -3,3 +3,8 @@ data.table
 purrr
 magrittr
 glue
+tidytext
+stringr
+wordcloud
+tm
+slam
