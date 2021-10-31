@@ -4,74 +4,90 @@ getMoviesForFranchise <- function(franchise_id) {
 
     html <- read_html(franchise_url)
 
-    movie_elements <- html %>%
+    franchise_elements <- html %>%
         html_elements(xpath = "//ul[@class='franchise-media-list js-franchise-media-list']") %>%
-        html_elements(xpath = "//li[@class='franchise-media-list__item']")
+        # `and .//div[@class='franchise-media-list__tomatometer']`: only scrape items that have a score
+        html_elements(xpath = "./li[@class='franchise-media-list__item' and .//div[@class='franchise-media-list__tomatometer']]")
 
-    movie_ids <- movie_elements %>%
-        html_elements(xpath = "//div[@class='franchise-media-list__poster']//a")  %>%
+    content_type <- franchise_elements %>%
+        html_attr("data-franchise-type")
+
+    ids <- franchise_elements %>%
+        html_elements(xpath = "./div[@class='franchise-media-list__poster']//a") %>%
         html_attr("href") %>%
-        gsub("/m/", "", .) %>%
         trimws()
 
-    movie_posters <- movie_elements %>%
-        html_elements(xpath = "//div[@class='franchise-media-list__poster']//img")  %>%
+    posters <- franchise_elements %>%
+        html_elements(xpath = "./div[@class='franchise-media-list__poster']/a/img")  %>%
         html_attr("src") %>%
         trimws()
 
-    media_scores <- movie_elements %>%
-        html_elements(xpath = "//div[@class='franchise-media-list__tomatometer']//strong") %>%
+    media_scores <- franchise_elements %>%
+        html_elements(xpath = "./div/div[@class='franchise-media-list__score']/div[@class='franchise-media-list__tomatometer']//strong") %>%
         html_text() %>%
         gsub("%", "", .) %>%
         trimws() %>%
         as.integer()
 
-    audience_scores <- movie_elements %>%
-        html_elements(xpath = "//div[@class='franchise-media-list__audiences']//strong") %>%
-        html_text() %>%
-        gsub("%", "", .) %>%
-        trimws() %>%
-        as.integer()
+    # audience_scores <- franchise_elements %>%
+    #     html_elements(xpath = "./div/div[@class='franchise-media-list__score']/div[@class='franchise-media-list__audiences']//strong") %>%
+    #     html_text() %>%
+    #     gsub("%", "", .) %>%
+    #     trimws() %>%
+    #     as.integer()
 
-    movie_titles <- movie_elements %>%
-        html_elements(xpath = "//h3[@class='franchise-media-list__h3']//a") %>%
+    titles <- franchise_elements %>%
+        html_elements(xpath = "./div/h3[@class='franchise-media-list__h3']//a") %>%
         html_text() %>%
         trimws()
 
-    movie_years <- movie_elements %>%
-        html_elements(xpath = "//h3[@class='franchise-media-list__h3']//span") %>%
+    release_years <- franchise_elements %>%
+        html_elements(xpath = "./div/h3[@class='franchise-media-list__h3']//span") %>%
         html_text() %>%
         gsub("\\(|\\)", "", .) %>%
         trimws() %>%
         as.integer()
 
-    movie_cast <- movie_elements %>%
-        html_elements(xpath = "//div[@data-qa='franchise-media-cast']") %>%
+    casts <- franchise_elements %>%
+        html_elements(xpath = "./div/div[@data-qa='franchise-media-cast']") %>%
         html_text() %>%
         gsub("Starring:", "", .) %>%
         trimws()
 
-
     all_same_length <- all(sapply(
         list(
-            movie_ids, movie_posters, media_scores, audience_scores,
-            movie_titles, movie_years, movie_cast
+            ids, posters, media_scores,
+            # audience_scores,
+            titles, release_years, casts
         ),
-        FUN = function(x) identical(length(x), length(movie_elements))
+        FUN = function(x) identical(length(x), length(franchise_elements))
     ))
 
     if (all_same_length) {
         return(data.table(
-            movie_id = movie_ids,
-            movie_title = movie_titles,
-            movie_poster = movie_posters,
+            rt_id = ids,
+            title = titles,
+            poster = posters,
             media_score = media_scores,
-            audience_score = audience_scores,
-            movie_year = movie_years,
-            movie_cast = movie_cast
+            # audience_score = audience_scores,
+            release_year = release_years,
+            cast = casts
         ))
     } else {
-        message(glue::glue("Mismatch in attribute lengths for url: {franchise_url}"))
+        message(glue::glue(
+            "
+                Mismatch in attribute lengths for url: {franchise_url},
+                franchise_elements: {length(franchise_elements)},
+                content_type: {length(content_type)},
+                ids: {length(ids)},
+                posters: {length(posters)},
+                media_scores: {length(media_scores)},
+                titles: {length(titles)},
+                release_years: {length(release_years)},
+                casts: {length(casts)}
+            "
+         ))
+
         return(NULL)
     }
 }
