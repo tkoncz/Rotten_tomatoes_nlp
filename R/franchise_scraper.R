@@ -71,7 +71,7 @@ getMoviesForFranchise <- function(franchise_id) {
             movie_cast = movie_cast
         ))
     } else {
-        message(glue::glue("Mismatch in attribute lengths for url: {url}"))
+        message(glue::glue("Mismatch in attribute lengths for url: {franchise_url}"))
         return(NULL)
     }
 }
